@@ -1,0 +1,13 @@
+{
+  "shift_id": "day",
+  "reference": "A",
+  "remote": "B",
+  "opening": [
+    {"item_id": "X", "station": "A", "grams": 7, "origin": "scale:day:17"},
+    {"item_id": "Y", "station": "B", "grams": 11, "origin": "scale:day:18"}
+  ],
+  "steps": [
+    {"shift_id": "day", "station": "A", "sequence": 1, "kind": "departure", "item_id": "X", "trip_id": "TX", "source": "A", "destination": "B", "origin": "release:day:41", "record_key": "A/entry-722"},
+    {"shift_id": "day", "station": "B", "sequence": 1, "kind": "arrival", "item_id": "X", "trip_id": "TX", "source": "A", "destination": "B", "origin": "receive:day:70", "record_key": "B/entry-136", "departure_sequence": 1, "departure_origin": "release:day:41"}
+  ]
+}
