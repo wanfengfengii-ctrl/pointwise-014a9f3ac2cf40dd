@@ -19,17 +19,23 @@ class CustodyLine:
 
 def _causal_order(cut):
     queues = (deque(cut.reference_actions), deque(cut.remote_actions))
-    departed = set()
+    # A taken-over release keeps its own trip identity even when a new-shift
+    # ordinary trip reuses that identifier within the same shift.
+    taken_tokens = {('handover', record.item_id) for record in cut.handovers}
+    taken_arrivals = {record.arrival: ('handover', record.item_id)
+                      for record in cut.handovers if record.arrival is not None}
+    departed = set(taken_tokens)
     while any(queues):
         for queue in queues:
             if not queue:
                 continue
             action = queue[0]
-            if action.kind == 'arrival' and action.trip_id not in departed:
+            token = taken_arrivals.get(action, ('station', action.trip_id))
+            if action.kind == 'arrival' and token not in departed:
                 continue
             queue.popleft()
             if action.kind == 'departure':
-                departed.add(action.trip_id)
+                departed.add(token)
             yield action
             break
         else:
@@ -43,6 +49,13 @@ def classify_custody(opening: OpeningStock, cut: QualifiedCut):
         raise ConflictError('opening stock does not match the qualified cut')
     positions = {item.item_id: item.station for item in opening.items}
     trails = {item.item_id: [] for item in opening.items}
+    for record in cut.handovers:
+        if record.item_id not in positions:
+            raise ConflictError(f'taken item is missing from the opening stock: {record.item_id}')
+        if record.departure.shift_id == request.shift_id:
+            raise ConflictError('a handover release belongs to the current shift')
+        positions[record.item_id] = None
+        trails[record.item_id].append(record.departure)
     for action in _causal_order(cut):
         if action.item_id not in positions:
             raise ConflictError(f'unknown item in cut: {action.item_id}')

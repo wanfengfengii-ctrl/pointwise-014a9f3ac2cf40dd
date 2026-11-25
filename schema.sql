@@ -89,4 +89,20 @@ CREATE TABLE IF NOT EXISTS issue_receipts (
     count_id TEXT PRIMARY KEY REFERENCES official_reports(count_id),
     receipt_id TEXT NOT NULL UNIQUE
 );
+CREATE TABLE IF NOT EXISTS handovers (
+    handover_id TEXT PRIMARY KEY,
+    count_id TEXT NOT NULL REFERENCES official_reports(count_id),
+    old_shift_id TEXT NOT NULL REFERENCES shifts(shift_id),
+    new_shift_id TEXT NOT NULL REFERENCES shifts(shift_id),
+    item_id TEXT NOT NULL,
+    trip_id TEXT NOT NULL,
+    departure_body TEXT NOT NULL,
+    departure_digest TEXT NOT NULL,
+    arrival_body TEXT,
+    arrival_digest TEXT,
+    UNIQUE (old_shift_id, item_id),
+    UNIQUE (new_shift_id, item_id),
+    CHECK (old_shift_id <> new_shift_id),
+    CHECK ((arrival_body IS NULL) = (arrival_digest IS NULL))
+);
 COMMIT;

@@ -22,7 +22,7 @@ class LiveLocation:
 
 def locate(db, shift_id, item_id):
     item = get_registration(db, shift_id, item_id)
-    if item is None:
+    if item is None or _taken_over(db, shift_id, item_id):
         return None
     row = db.execute('SELECT * FROM live_locations WHERE shift_id = ? AND item_id = ?',
                      (shift_id, item_id)).fetchone()
@@ -32,6 +32,11 @@ def locate(db, shift_id, item_id):
     arrived = decode_action(row['arrival_body']) if row['arrival_body'] is not None else None
     return LiveLocation(*base, row['station'], row['destination'],
                         decode_action(row['departure_body']), arrived)
+
+
+def _taken_over(db, shift_id, item_id):
+    return db.execute('SELECT 1 FROM handovers WHERE old_shift_id = ? AND item_id = ? LIMIT 1',
+                      (shift_id, item_id)).fetchone() is not None
 
 
 def save_location(db, departure, arrival=None):
@@ -54,6 +59,8 @@ def resident_ids(db, shift_id, station):
         'SELECT r.item_id FROM registrations AS r LEFT JOIN live_locations AS l '
         'ON r.shift_id = l.shift_id AND r.item_id = l.item_id WHERE r.shift_id = ? '
         'AND CASE WHEN l.item_id IS NULL THEN r.station ELSE l.station END = ? '
+        'AND NOT EXISTS (SELECT 1 FROM handovers AS h '
+        'WHERE h.old_shift_id = r.shift_id AND h.item_id = r.item_id) '
         'ORDER BY r.item_id', (shift_id, station),
     )
     return tuple(row['item_id'] for row in rows)

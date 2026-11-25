@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from capture.resume import CaptureBundle
 from capture.station_evidence import StationEvidence
+from movement.handover import HandoverRecord
 from movement.station_journal import (StationAction, extend_digest, initial_digest, same_release,
                                       valid_position, validate_action)
 from storage import ConflictError
@@ -12,6 +13,7 @@ class QualifiedCut:
     bundle: CaptureBundle
     reference_actions: tuple[StationAction, ...]
     remote_actions: tuple[StationAction, ...]
+    handovers: tuple[HandoverRecord, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -40,7 +42,7 @@ def _validate_boundary(bundle, proof, station):
         raise ConflictError('station evidence contains an action outside its prefix')
 
 
-def _index_originals(bundle):
+def _index_originals(bundle, handover_arrivals=frozenset()):
     request = bundle.request
     stations = {request.reference, request.remote}
     supplied = []
@@ -58,10 +60,48 @@ def _index_originals(bundle):
         if action.shift_id != request.shift_id or {action.source, action.destination} != stations:
             raise ConflictError('an action belongs to a different shift or route')
         slot = by_station[action.station].setdefault(action.sequence, action)
+        if action != slot:
+            raise ConflictError(f'conflicting originals at {action.station} {action.sequence}')
+        if action in handover_arrivals:
+            # A taken-over receipt references an old-shift trip; its identifier may
+            # legitimately coincide with a new-shift ordinary trip.
+            continue
         identity = by_trip.setdefault((action.kind, action.trip_id), action)
-        if action != slot or action != identity:
+        if action != identity:
             raise ConflictError(f'conflicting originals for trip {action.trip_id}')
     return by_station, by_trip
+
+
+def _check_handovers(bundle):
+    request = bundle.request
+    stations = {request.reference, request.remote}
+    taken = {}
+    for record in bundle.handovers:
+        departure = record.departure
+        validate_action(departure)
+        if departure.kind != 'departure' or departure.shift_id == request.shift_id:
+            raise ConflictError('a handover does not hold an old-shift release')
+        if departure.item_id != record.item_id or departure.trip_id != record.trip_id:
+            raise ConflictError('a handover release is bound to a different item or trip')
+        if {departure.source, departure.destination} != stations:
+            raise ConflictError('a handover release is outside this line')
+        if record.item_id in taken:
+            raise ConflictError('an item is taken over more than once')
+        taken[record.item_id] = record
+    return taken
+
+
+def _check_handover_receipts(taken, by_station):
+    for record in taken.values():
+        arrival = record.arrival
+        if arrival is None:
+            continue
+        if (arrival.shift_id, arrival.item_id, arrival.trip_id, arrival.station) != (
+                record.new_shift_id, record.item_id, record.trip_id, record.departure.destination):
+            raise ConflictError('a recorded handover arrival contradicts its release')
+        supplied = by_station.get(arrival.station, {}).get(arrival.sequence)
+        if supplied is not None and supplied != arrival:
+            raise ConflictError('a received handover does not match the station record')
 
 
 def _prefix(request, proof: StationEvidence, originals):
@@ -76,10 +116,14 @@ def _prefix(request, proof: StationEvidence, originals):
     return actions, True
 
 
-def _check_trip_links(by_trip, cuts):
+def _check_trip_links(by_trip, cuts, handovers=None):
+    handovers = handovers or {}
     missing = []
     for (kind, trip_id), arrival in by_trip.items():
         if kind != 'arrival':
+            continue
+        record = handovers.get(trip_id)
+        if record is not None and arrival == record.arrival:
             continue
         departure = by_trip.get(('departure', trip_id))
         if departure is not None and not same_release(arrival, departure):
@@ -100,10 +144,14 @@ def verify_evidence(bundle):
     try:
         _validate_boundary(bundle, bundle.reference, request.reference)
         _validate_boundary(bundle, bundle.remote, request.remote)
-        by_station, by_trip = _index_originals(bundle)
+        by_station, by_trip = _index_originals(
+            bundle, {record.arrival for record in bundle.handovers if record.arrival is not None})
+        taken = _check_handovers(bundle)
+        _check_handover_receipts(taken, by_station)
         cuts = {request.reference: bundle.markers.reference_cut,
                 request.remote: bundle.remote.position if bundle.remote is not None else None}
-        missing = _check_trip_links(by_trip, cuts)
+        missing = _check_trip_links(by_trip, cuts,
+                                    {record.trip_id: record for record in taken.values()})
         prefixes = {}
         incomplete = []
         for proof in (bundle.reference, bundle.remote):
@@ -120,5 +168,6 @@ def verify_evidence(bundle):
             return EvidenceDecision('pending', 'incomplete station prefixes at ' + ', '.join(incomplete))
     except ValueError as error:
         return EvidenceDecision('rejected', str(error))
-    return EvidenceDecision('qualified', cut=QualifiedCut(bundle, prefixes[request.reference],
-                                                          prefixes[request.remote]))
+    return EvidenceDecision('qualified', cut=QualifiedCut(
+        bundle, prefixes[request.reference], prefixes[request.remote],
+        tuple(taken[item_id] for item_id in sorted(taken))))

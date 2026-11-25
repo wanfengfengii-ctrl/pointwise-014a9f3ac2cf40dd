@@ -24,3 +24,7 @@
 ## 关源交接
 
 `LocalRecording.read_available(station, first=1, last=None)` 只读源窗口，`close_source()` 关闭该录制端口。现场推进会逐站滚掉较早原件。`history.retrieve.retrieve(db, count_id)` 返回固定成果和首执的二元组。`history.shift_index.list_shift_reports(db, shift_id)` 按盘点号排序列本班已签盘点。`history.provenance.trace(db, count_id, item_id)` 查原称重和固定趟据。`history.reconcile.reconcile_item` 同时给出固定边界、归属依据和现场追查出处。未知或待签号、以及不存在的盘点条目返回 `None`。
+
+## 途中测件跨班交接
+
+`SHIFT_HANDOVER.md` 规定夜班接手白班已签盘点中仍在原趟途中的测件的调用约定。`movement.handover.take_over` 按交班号把该件及其原放行转入新班，旧班 `locate` 随即返回 `None`；`movement.handover.receive` 以新班真实点收结束该原趟。接管件纳入新班期初盘点并沿用原称重与放行，原放行不占新班站点原序或普通趟号。
